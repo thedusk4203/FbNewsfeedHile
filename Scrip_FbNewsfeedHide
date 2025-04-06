@@ -99,7 +99,7 @@
     
     // Phím tắt để bật/tắt overlay
     document.addEventListener('keydown', function(e) {
-        // Alt + F để bật/tắt overlay
+        // Alt + S để bật/tắt overlay
         if (e.altKey && e.key === 's') {
             const overlay = document.getElementById('fb-overlay');
             if (overlay) {
