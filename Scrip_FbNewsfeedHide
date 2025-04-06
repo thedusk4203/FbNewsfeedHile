@@ -1,0 +1,114 @@
+// ==UserScript==
+// @name         Facebook Hide Newsfeed
+// @namespace    http://tampermonkey.net/
+// @version      1.0
+// @description  Ẩn newsfeed Facebook để tránh phân tâm khi chat
+// @author       You
+// @match        https://*.facebook.com/*
+// @grant        none
+// ==/UserScript==
+
+(function() {
+    'use strict';
+    
+    // Hàm chính để ẩn newsfeed
+    function hideNewsfeed() {
+        // Tìm và ẩn phần newsfeed chính
+        const feedElements = document.querySelectorAll('[role="feed"]');
+        feedElements.forEach(feed => {
+            if (feed) {
+                feed.style.display = 'none';
+            }
+        });
+        
+        // Tìm và ẩn các container newsfeed khác
+        const feedContainers = document.querySelectorAll('[data-pagelet="FeedUnit"]');
+        feedContainers.forEach(container => {
+            if (container) {
+                container.style.display = 'none';
+            }
+        });
+        
+        // Tạo overlay để che phần newsfeed
+        const mainContent = document.querySelector('[role="main"]');
+        if (mainContent && !document.getElementById('fb-overlay')) {
+            const overlay = document.createElement('div');
+            overlay.id = 'fb-overlay';
+            overlay.style.position = 'absolute';
+            overlay.style.top = '0';
+            overlay.style.left = '0';
+            overlay.style.width = '100%';
+            overlay.style.height = '100%';
+            overlay.style.backgroundColor = '#f0f2f5';
+            overlay.style.zIndex = '999';
+            overlay.style.display = 'flex';
+            overlay.style.justifyContent = 'center';
+            overlay.style.alignItems = 'center';
+            
+            const message = document.createElement('div');
+            message.textContent = 'Newsfeed đã bị ẩn để giúp bạn tập trung';
+            message.style.fontSize = '24px';
+            message.style.color = '#1877f2';
+            message.style.fontWeight = 'bold';
+            
+            const toggleButton = document.createElement('button');
+            toggleButton.textContent = 'Hiện/Ẩn Newsfeed';
+            toggleButton.style.padding = '10px 20px';
+            toggleButton.style.margin = '20px';
+            toggleButton.style.backgroundColor = '#1877f2';
+            toggleButton.style.color = 'white';
+            toggleButton.style.border = 'none';
+            toggleButton.style.borderRadius = '5px';
+            toggleButton.style.cursor = 'pointer';
+            
+            toggleButton.addEventListener('click', function() {
+                if (overlay.style.display === 'none') {
+                    overlay.style.display = 'flex';
+                } else {
+                    overlay.style.display = 'none';
+                }
+            });
+            
+            overlay.appendChild(message);
+            overlay.appendChild(toggleButton);
+            mainContent.style.position = 'relative';
+            mainContent.appendChild(overlay);
+        }
+        
+        // Đảm bảo phần chat vẫn hiển thị
+        const chatElements = document.querySelectorAll('[aria-label*="chat"], [aria-label*="Chat"]');
+        chatElements.forEach(chat => {
+            if (chat) {
+                chat.style.zIndex = '1000';
+            }
+        });
+    }
+    
+    // Chạy khi trang được tải
+    hideNewsfeed();
+    
+    // Chạy lại khi DOM thay đổi để đảm bảo luôn ẩn newsfeed
+    const observer = new MutationObserver(function(mutations) {
+        hideNewsfeed();
+    });
+    
+    observer.observe(document.body, {
+        childList: true,
+        subtree: true
+    });
+    
+    // Phím tắt để bật/tắt overlay
+    document.addEventListener('keydown', function(e) {
+        // Alt + F để bật/tắt overlay
+        if (e.altKey && e.key === 's') {
+            const overlay = document.getElementById('fb-overlay');
+            if (overlay) {
+                if (overlay.style.display === 'none') {
+                    overlay.style.display = 'flex';
+                } else {
+                    overlay.style.display = 'none';
+                }
+            }
+        }
+    });
+})();
