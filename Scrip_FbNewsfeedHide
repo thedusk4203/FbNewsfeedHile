@@ -1,114 +1,727 @@
 // ==UserScript==
-// @name         Facebook Hide Newsfeed
-// @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Ẩn newsfeed Facebook để tránh phân tâm khi chat
-// @author       You
-// @match        https://*.facebook.com/*
+// @name         Facebook Focus - Profile + Messenger
+// @namespace    fb-focus-soft
+// @version      4.2.1
+// @description  Chỉ hiển thị Profile và Messenger, ẩn mềm nội dung các khu vực Facebook khác
+// @match        https://facebook.com/*
+// @match        https://www.facebook.com/*
+// @match        https://web.facebook.com/*
+// @run-at       document-start
 // @grant        none
+// @noframes
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
-    
-    // Hàm chính để ẩn newsfeed
-    function hideNewsfeed() {
-        // Tìm và ẩn phần newsfeed chính
-        const feedElements = document.querySelectorAll('[role="feed"]');
-        feedElements.forEach(feed => {
-            if (feed) {
-                feed.style.display = 'none';
-            }
-        });
-        
-        // Tìm và ẩn các container newsfeed khác
-        const feedContainers = document.querySelectorAll('[data-pagelet="FeedUnit"]');
-        feedContainers.forEach(container => {
-            if (container) {
-                container.style.display = 'none';
-            }
-        });
-        
-        // Tạo overlay để che phần newsfeed
-        const mainContent = document.querySelector('[role="main"]');
-        if (mainContent && !document.getElementById('fb-overlay')) {
-            const overlay = document.createElement('div');
-            overlay.id = 'fb-overlay';
-            overlay.style.position = 'absolute';
-            overlay.style.top = '0';
-            overlay.style.left = '0';
-            overlay.style.width = '100%';
-            overlay.style.height = '100%';
-            overlay.style.backgroundColor = '#f0f2f5';
-            overlay.style.zIndex = '999';
-            overlay.style.display = 'flex';
-            overlay.style.justifyContent = 'center';
-            overlay.style.alignItems = 'center';
-            
-            const message = document.createElement('div');
-            message.textContent = 'Newsfeed đã bị ẩn để giúp bạn tập trung';
-            message.style.fontSize = '24px';
-            message.style.color = '#1877f2';
-            message.style.fontWeight = 'bold';
-            
-            const toggleButton = document.createElement('button');
-            toggleButton.textContent = 'Hiện/Ẩn Newsfeed';
-            toggleButton.style.padding = '10px 20px';
-            toggleButton.style.margin = '20px';
-            toggleButton.style.backgroundColor = '#1877f2';
-            toggleButton.style.color = 'white';
-            toggleButton.style.border = 'none';
-            toggleButton.style.borderRadius = '5px';
-            toggleButton.style.cursor = 'pointer';
-            
-            toggleButton.addEventListener('click', function() {
-                if (overlay.style.display === 'none') {
-                    overlay.style.display = 'flex';
-                } else {
-                    overlay.style.display = 'none';
-                }
-            });
-            
-            overlay.appendChild(message);
-            overlay.appendChild(toggleButton);
-            mainContent.style.position = 'relative';
-            mainContent.appendChild(overlay);
-        }
-        
-        // Đảm bảo phần chat vẫn hiển thị
-        const chatElements = document.querySelectorAll('[aria-label*="chat"], [aria-label*="Chat"]');
-        chatElements.forEach(chat => {
-            if (chat) {
-                chat.style.zIndex = '1000';
-            }
-        });
+
+    const STYLE_ID = 'fbfocus-style';
+    const BUTTON_ID = 'fbfocus-toggle';
+    const PLACEHOLDER_ID = 'fbfocus-placeholder';
+    const STORAGE_KEY = 'fbfocus-enabled';
+
+    let enabled = localStorage.getItem(STORAGE_KEY) !== 'false';
+    let lastURL = location.href;
+    let timer = null;
+
+    const SYSTEM_ROUTES = new Set([
+        '',
+        'home',
+        'home.php',
+        'groups',
+        'group',
+        'reel',
+        'reels',
+        'watch',
+        'marketplace',
+        'gaming',
+        'games',
+        'events',
+        'friends',
+        'search',
+        'notifications',
+        'saved',
+        'memories',
+        'feeds',
+        'stories',
+        'pages',
+        'bookmarks',
+        'professional_dashboard',
+        'settings',
+        'help',
+        'photo',
+        'photos',
+        'story.php',
+        'permalink.php',
+        'hashtag',
+        'share',
+        'ads',
+        'business'
+    ]);
+
+    // =========================================================
+    // ROUTE
+    // =========================================================
+
+    function getPath() {
+        return location.pathname
+            .replace(/^\/+/, '')
+            .replace(/\/+$/, '');
     }
-    
-    // Chạy khi trang được tải
-    hideNewsfeed();
-    
-    // Chạy lại khi DOM thay đổi để đảm bảo luôn ẩn newsfeed
-    const observer = new MutationObserver(function(mutations) {
-        hideNewsfeed();
-    });
-    
-    observer.observe(document.body, {
-        childList: true,
-        subtree: true
-    });
-    
-    // Phím tắt để bật/tắt overlay
-    document.addEventListener('keydown', function(e) {
-        // Alt + S để bật/tắt overlay
-        if (e.altKey && e.key === 's') {
-            const overlay = document.getElementById('fb-overlay');
-            if (overlay) {
-                if (overlay.style.display === 'none') {
-                    overlay.style.display = 'flex';
-                } else {
-                    overlay.style.display = 'none';
-                }
+
+    function isMessenger() {
+        const path = getPath().toLowerCase();
+
+        return (
+            path === 'messages' ||
+            path.startsWith('messages/')
+        );
+    }
+
+    function isProfile() {
+        const path = getPath();
+
+        if (!path) {
+            return false;
+        }
+
+        const lower = path.toLowerCase();
+
+        if (
+            lower === 'me' ||
+            lower.startsWith('me/')
+        ) {
+            return true;
+        }
+
+        if (lower === 'profile.php') {
+            return true;
+        }
+
+        const root =
+            path.split('/')[0].toLowerCase();
+
+        if (SYSTEM_ROUTES.has(root)) {
+            return false;
+        }
+
+        if (
+            root === 'ajax' ||
+            root === 'api' ||
+            root === 'dialog' ||
+            root === 'plugins'
+        ) {
+            return false;
+        }
+
+        // facebook.com/username
+        return true;
+    }
+
+    function isAllowed() {
+        return (
+            isMessenger() ||
+            isProfile()
+        );
+    }
+
+    // =========================================================
+    // CSS
+    // =========================================================
+
+    function installStyle() {
+        if (document.getElementById(STYLE_ID)) {
+            return;
+        }
+
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+
+        style.textContent = `
+
+            /*
+             * Nội dung bị ẩn trên các tab không được phép.
+             */
+            html.fb-focus-blocked body [role="main"] {
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
+
+            html.fb-focus-blocked [data-pagelet="MainFeed"],
+            html.fb-focus-blocked [data-pagelet="Feed"],
+            html.fb-focus-blocked [data-pagelet^="FeedUnit_"],
+            html.fb-focus-blocked [data-pagelet="FeedUnit"],
+            html.fb-focus-blocked [role="feed"] {
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
+
+            html.fb-focus-blocked
+            [data-fbfocus-hide="true"] {
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
+
+
+            /* =================================================
+               NÚT FOCUS MODE
+               Luôn nổi trên cùng, góc dưới trái
+               ================================================= */
+
+            #${BUTTON_ID} {
+                position: fixed !important;
+
+                left: 16px !important;
+                bottom: 16px !important;
+
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+
+                z-index: 2147483647 !important;
+
+                width: auto !important;
+                height: auto !important;
+
+                padding: 10px 15px !important;
+
+                border: 0 !important;
+                border-radius: 9px !important;
+
+                font-family:
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    "Segoe UI",
+                    Roboto,
+                    Arial,
+                    sans-serif !important;
+
+                font-size: 13px !important;
+                line-height: 18px !important;
+                font-weight: 600 !important;
+
+                cursor: pointer !important;
+
+                box-shadow:
+                    0 2px 12px rgba(0,0,0,.25) !important;
+
+                pointer-events: auto !important;
+            }
+
+            #${BUTTON_ID}.enabled {
+                background: #1877f2 !important;
+                color: #ffffff !important;
+            }
+
+            #${BUTTON_ID}.disabled {
+                background: #e4e6eb !important;
+                color: #050505 !important;
+            }
+
+
+            /* =================================================
+               THÔNG BÁO
+               ================================================= */
+
+            #${PLACEHOLDER_ID} {
+                position: fixed !important;
+
+                left: 50% !important;
+                top: 100px !important;
+
+                transform: translateX(-50%) !important;
+
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+
+                z-index: 2147483600 !important;
+
+                box-sizing: border-box !important;
+
+                width: min(
+                    560px,
+                    calc(100vw - 40px)
+                ) !important;
+
+                padding: 25px !important;
+
+                border-radius: 12px !important;
+
+                background: #ffffff !important;
+
+                box-shadow:
+                    0 2px 12px rgba(0,0,0,.15) !important;
+
+                text-align: center !important;
+
+                font-family:
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    "Segoe UI",
+                    Roboto,
+                    Arial,
+                    sans-serif !important;
+
+                pointer-events: none !important;
+            }
+
+            #${PLACEHOLDER_ID} .title {
+                margin-bottom: 6px !important;
+
+                color: #050505 !important;
+
+                font-size: 19px !important;
+                font-weight: 600 !important;
+            }
+
+            #${PLACEHOLDER_ID} .desc {
+                color: #65676b !important;
+
+                font-size: 13px !important;
+                line-height: 1.5 !important;
+            }
+        `;
+
+        document.documentElement.appendChild(style);
+    }
+
+    // =========================================================
+    // BUTTON
+    // =========================================================
+
+    function createButton() {
+        if (document.getElementById(BUTTON_ID)) {
+            return;
+        }
+
+        const button =
+            document.createElement('button');
+
+        button.id = BUTTON_ID;
+        button.type = 'button';
+
+        button.addEventListener(
+            'click',
+            function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+
+                enabled = !enabled;
+
+                localStorage.setItem(
+                    STORAGE_KEY,
+                    String(enabled)
+                );
+
+                update();
+            }
+        );
+
+        /*
+         * QUAN TRỌNG:
+         *
+         * Gắn thẳng vào <html>, KHÔNG gắn vào body.
+         * Như vậy Facebook không thể giấu nút cùng main content.
+         */
+        document.documentElement.appendChild(button);
+    }
+
+    function updateButton() {
+        const button =
+            document.getElementById(BUTTON_ID);
+
+        if (!button) {
+            return;
+        }
+
+        if (enabled) {
+            button.textContent =
+                '🔒 Focus Mode: ON';
+
+            button.classList.add('enabled');
+            button.classList.remove('disabled');
+
+        } else {
+            button.textContent =
+                '🔓 Focus Mode: OFF';
+
+            button.classList.add('disabled');
+            button.classList.remove('enabled');
+        }
+    }
+
+    // =========================================================
+    // HIDDEN NODES
+    // =========================================================
+
+    function clearDetectedNodes() {
+        document
+            .querySelectorAll(
+                '[data-fbfocus-hide="true"]'
+            )
+            .forEach(el => {
+                el.removeAttribute(
+                    'data-fbfocus-hide'
+                );
+            });
+    }
+
+    // =========================================================
+    // FALLBACK DETECTOR
+    // =========================================================
+
+    function detectCenterContent() {
+        /*
+         * Nếu Facebook có role=main,
+         * CSS phía trên đã xử lý.
+         */
+        if (
+            document.querySelector(
+                'body [role="main"]'
+            )
+        ) {
+            return;
+        }
+
+        if (!document.body) {
+            return;
+        }
+
+        const button =
+            document.getElementById(BUTTON_ID);
+
+        const placeholder =
+            document.getElementById(
+                PLACEHOLDER_ID
+            );
+
+        const elements =
+            document.body.querySelectorAll('div');
+
+        let best = null;
+        let bestScore = -Infinity;
+
+        const viewportCenter =
+            window.innerWidth / 2;
+
+        for (const el of elements) {
+
+            /*
+             * TUYỆT ĐỐI không chọn node chứa
+             * button hoặc placeholder.
+             */
+            if (
+                button &&
+                (
+                    el === button ||
+                    el.contains(button)
+                )
+            ) {
+                continue;
+            }
+
+            if (
+                placeholder &&
+                (
+                    el === placeholder ||
+                    el.contains(placeholder)
+                )
+            ) {
+                continue;
+            }
+
+            const rect =
+                el.getBoundingClientRect();
+
+            if (
+                rect.width < 420 ||
+                rect.height < 350
+            ) {
+                continue;
+            }
+
+            /*
+             * Không lấy root container toàn màn hình.
+             */
+            if (
+                rect.width >
+                window.innerWidth * 0.88
+            ) {
+                continue;
+            }
+
+            if (
+                rect.bottom < 100
+            ) {
+                continue;
+            }
+
+            const center =
+                rect.left +
+                rect.width / 2;
+
+            const distance =
+                Math.abs(
+                    center -
+                    viewportCenter
+                );
+
+            let score =
+                1000 - distance;
+
+            if (
+                rect.width >= 450 &&
+                rect.width <= 1100
+            ) {
+                score += 300;
+            }
+
+            score +=
+                Math.min(
+                    rect.height,
+                    2000
+                ) / 10;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = el;
             }
         }
-    });
+
+        if (best) {
+            best.setAttribute(
+                'data-fbfocus-hide',
+                'true'
+            );
+        }
+    }
+
+    // =========================================================
+    // PLACEHOLDER
+    // =========================================================
+
+    function removePlaceholder() {
+        document
+            .getElementById(
+                PLACEHOLDER_ID
+            )
+            ?.remove();
+    }
+
+    function createPlaceholder() {
+        if (
+            document.getElementById(
+                PLACEHOLDER_ID
+            )
+        ) {
+            return;
+        }
+
+        const placeholder =
+            document.createElement('div');
+
+        placeholder.id =
+            PLACEHOLDER_ID;
+
+        placeholder.innerHTML = `
+            <div class="title">
+                Nội dung đã được ẩn
+            </div>
+
+            <div class="desc">
+                Focus Mode chỉ hiển thị Profile và Messenger.
+            </div>
+        `;
+
+        /*
+         * Cũng gắn trực tiếp vào <html>.
+         */
+        document.documentElement.appendChild(
+            placeholder
+        );
+    }
+
+    // =========================================================
+    // UPDATE
+    // =========================================================
+
+    function update() {
+        installStyle();
+
+        createButton();
+        updateButton();
+
+        /*
+         * Focus OFF
+         */
+        if (!enabled) {
+            document.documentElement
+                .classList.remove(
+                    'fb-focus-blocked'
+                );
+
+            clearDetectedNodes();
+            removePlaceholder();
+
+            return;
+        }
+
+        /*
+         * Profile / Messenger
+         */
+        if (isAllowed()) {
+            document.documentElement
+                .classList.remove(
+                    'fb-focus-blocked'
+                );
+
+            clearDetectedNodes();
+            removePlaceholder();
+
+            return;
+        }
+
+        /*
+         * Những tab còn lại.
+         */
+        document.documentElement
+            .classList.add(
+                'fb-focus-blocked'
+            );
+
+        clearDetectedNodes();
+
+        /*
+         * Tạo UI trước để detector biết
+         * chính xác những node nào phải bảo vệ.
+         */
+        createPlaceholder();
+
+        detectCenterContent();
+
+        /*
+         * Đảm bảo nút luôn tồn tại sau React rerender.
+         */
+        createButton();
+        updateButton();
+    }
+
+    // =========================================================
+    // THROTTLE
+    // =========================================================
+
+    function scheduleUpdate() {
+        if (timer) {
+            return;
+        }
+
+        timer =
+            setTimeout(
+                function () {
+                    timer = null;
+                    update();
+                },
+                120
+            );
+    }
+
+    // =========================================================
+    // OBSERVER
+    // =========================================================
+
+    const observer =
+        new MutationObserver(
+            scheduleUpdate
+        );
+
+    observer.observe(
+        document.documentElement,
+        {
+            childList: true,
+            subtree: true
+        }
+    );
+
+    // =========================================================
+    // URL WATCHER
+    // =========================================================
+
+    setInterval(
+        function () {
+            if (
+                location.href !==
+                lastURL
+            ) {
+                lastURL =
+                    location.href;
+
+                clearDetectedNodes();
+                removePlaceholder();
+
+                scheduleUpdate();
+            }
+        },
+        200
+    );
+
+    window.addEventListener(
+        'popstate',
+        scheduleUpdate
+    );
+
+    // =========================================================
+    // ALT + S
+    // =========================================================
+
+    document.addEventListener(
+        'keydown',
+        function (event) {
+
+            if (
+                event.altKey &&
+                !event.ctrlKey &&
+                !event.shiftKey &&
+                event.key.toLowerCase() === 's'
+            ) {
+                event.preventDefault();
+
+                enabled = !enabled;
+
+                localStorage.setItem(
+                    STORAGE_KEY,
+                    String(enabled)
+                );
+
+                update();
+            }
+        },
+        true
+    );
+
+    // =========================================================
+    // START
+    // =========================================================
+
+    installStyle();
+    createButton();
+    updateButton();
+
+    if (
+        document.readyState === 'loading'
+    ) {
+        document.addEventListener(
+            'DOMContentLoaded',
+            update,
+            { once: true }
+        );
+
+    } else {
+        update();
+    }
+
+    setTimeout(update, 200);
+    setTimeout(update, 700);
+    setTimeout(update, 1500);
+    setTimeout(update, 3000);
+
 })();
